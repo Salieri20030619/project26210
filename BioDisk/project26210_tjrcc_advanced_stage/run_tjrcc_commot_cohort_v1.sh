@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="/mnt/BioDisk/ludingyu/project26210"
+TJ_ROOT="${PROJECT_ROOT}/external/ccRCC_spatial/TJ_RCC_figshare_24599295"
+RUN_ROOT="${TJ_ROOT}/advanced_full_v2"
+SCRIPT_DIR="${RUN_ROOT}/scripts"
+OUTPUT_ROOT="${RUN_ROOT}/commot/samples"
+LOG_ROOT="${RUN_ROOT}/logs/commot"
+MAX_WORKERS=2
+
+source /mnt/BioDisk/wangmingyuan/project26210_envs/activate_part4_advanced_env_v1.sh
+expected_python="/mnt/BioDisk/wangmingyuan/project26210_envs/part4_advanced_py_v1/bin/python"
+[[ "$(command -v python)" == "${expected_python}" ]] || { echo "Unexpected Python: $(command -v python)" >&2; exit 4; }
+mkdir -p "${OUTPUT_ROOT}" "${LOG_ROOT}"
+
+samples=(H46_T J38_T R114_T R29_T R51_T S15_T X49_T X98_T Y12_T Y27_T Y7_T Z43_T)
+inputs=(
+  "${TJ_ROOT}/cell2location_remaining_v1/H46_T/H46_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/J38_T/J38_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/R114_T/R114_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/R29_T/R29_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_pilot_v4/high_R51_T/R51_T_cell2location_pilot.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/S15_T/S15_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_pilot_v4/medium_X49_T/X49_T_cell2location_pilot.h5ad"
+  "${TJ_ROOT}/cell2location_pilot_v4/low_X98_T/X98_T_cell2location_pilot.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/Y12_T/Y12_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/Y27_T/Y27_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/Y7_T/Y7_T_cell2location.h5ad"
+  "${TJ_ROOT}/cell2location_remaining_v1/Z43_T/Z43_T_cell2location.h5ad"
+)
+
+run_one() {
+  local index="$1"
+  local sample="${samples[$index]}"
+  local input="${inputs[$index]}"
+  local boundary="${RUN_ROOT}/bayesspace/${sample}/${sample}_computational_boundary_spots.tsv"
+  local output="${OUTPUT_ROOT}/${sample}"
+  local log="${LOG_ROOT}/${sample}.log"
+  if [[ -f "${output}/status.json" ]] && rg -q '"status": "complete"' "${output}/status.json"; then
+    echo "[$(date '+%F %T %z')] SKIP completed sample=${sample}" | tee -a "${log}"
+    return 0
+  fi
+  [[ -s "${boundary}" ]] || { echo "Missing boundary: ${boundary}" >&2; return 1; }
+  mkdir -p "${output}"
+  {
+    echo "[$(date '+%F %T %z')] START sample=${sample}"
+    "${PROJECT_ROOT}/check_memory_gate.sh"
+    python "${SCRIPT_DIR}/run_tjrcc_commot_candidate_v1.py" "${sample}" "${input}" "${boundary}" "${output}"
+    echo "[$(date '+%F %T %z')] PASS sample=${sample}"
+  } >"${log}" 2>&1
+}
+
+declare -a pids=()
+fail=0
+for index in "${!samples[@]}"; do
+  run_one "${index}" &
+  pids+=("$!")
+  while (( ${#pids[@]} >= MAX_WORKERS )); do
+    next=()
+    for pid in "${pids[@]}"; do
+      if kill -0 "${pid}" 2>/dev/null; then
+        next+=("${pid}")
+      elif ! wait "${pid}"; then
+        fail=1
+      fi
+    done
+    pids=("${next[@]}")
+    (( ${#pids[@]} < MAX_WORKERS )) || sleep 2
+  done
+done
+for pid in "${pids[@]}"; do
+  wait "${pid}" || fail=1
+done
+(( fail == 0 )) || { echo "TJRCC_COMMOT_COHORT_FAILED" >&2; exit 1; }
+echo "TJRCC_COMMOT_COHORT_ALL_PASS samples=${#samples[@]}"

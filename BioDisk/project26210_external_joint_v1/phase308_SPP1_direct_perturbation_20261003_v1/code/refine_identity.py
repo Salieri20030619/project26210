@@ -1,0 +1,18 @@
+from pathlib import Path
+import os
+os.environ['OPENBLAS_NUM_THREADS']='4';os.environ['NUMBA_NUM_THREADS']='4';os.environ['OMP_NUM_THREADS']='4'
+import json,datetime,subprocess
+import numpy as np,pandas as pd,scanpy as sc,anndata as ad
+P=Path(__file__).resolve().parents[1];assert json.loads((P/'qc/QC_CLUSTER_COMPLETE.json').read_text())['status']=='READY_FOR_IDENTITY_REVIEW'
+protocol={'created':datetime.datetime.now().astimezone().isoformat(),'parents':['1','4','6','7'],'reason':'Highacinarbackground orweak/mixedlineagemarkers, reviewedwithoutKO/WTendpointcomparison. Refineidentity only, no outcome-driven threshold.', 'method':'Withincombinedambiguoussubset,HVG2000bylibrary,excludeSpp1/Tymp,mitochondrial,ribosomal,Gm-numberedandAY036118technicalfeatures;PCA35,neighbors20,Leiden0.8;sameQCcells. Allparentsandoriginalobjectpreserved.'};(P/'resources/IDENTITY_REFINEMENT_PROTOCOL.json').write_text(json.dumps(protocol,indent=2));subprocess.run(['bash','/mnt/BioDisk/ludingyu/project26210/check_memory_gate.sh'],check=True,stdout=subprocess.DEVNULL)
+a=ad.read_h5ad(P/'inputs/counts_qc_clustered.h5ad');a.obs['cluster_initial']=a.obs.cluster.astype(str);ii=a.obs.cluster_initial.isin(protocol['parents']).to_numpy();b=a[ii].copy();b.X=b.layers['lognorm'].copy();sc.pp.highly_variable_genes(b,n_top_genes=2000,batch_key='library',flavor='seurat');bad=b.var_names.isin(['Spp1','Tymp','AY036118'])|b.var_names.str.match(r'^(mt-|Rpl|Rps|Gm\d)');b.var.loc[bad,'highly_variable']=False;c=b[:,b.var.highly_variable].copy();sc.pp.scale(c,max_value=10);sc.tl.pca(c,n_comps=35,random_state=26210,svd_solver='arpack');b.obsm['X_pca']=c.obsm['X_pca'];sc.pp.neighbors(b,n_neighbors=20,n_pcs=35,random_state=26210);sc.tl.leiden(b,resolution=.8,key_added='refined',flavor='igraph',n_iterations=2,directed=False,random_state=26210);a.obs['cluster']=a.obs.cluster_initial.astype(str);a.obs.loc[b.obs_names,'cluster']='R'+b.obs.refined.astype(str)
+panels=json.loads((P/'resources/IDENTITY_MARKER_PANELS.json').read_text());x=a.layers['lognorm'].tocsr();raw=a.X.tocsr();globalavg=np.asarray(x.mean(0)).ravel();rows=[];markers=[];cover=[]
+for cl in sorted(a.obs.cluster.unique()):
+ sel=a.obs.cluster.eq(cl).to_numpy();avg=np.asarray(x[sel].mean(0)).ravel();det=np.asarray((raw[sel]>0).mean(0)).ravel();delta=avg-globalavg;allow=(det>=.2)&~a.var_names.isin(['Spp1','Tymp']);ids=np.where(allow)[0];top=ids[np.argsort(delta[ids])[::-1][:35]]
+ for j in top:markers.append({'cluster':cl,'gene':a.var_names[j],'mean_logCP10K':avg[j],'detected_fraction':det[j],'enrichment_vs_all':delta[j]})
+ r={'cluster':cl,'cells':int(sel.sum()),'median_UMI':float(a.obs.loc[sel,'total_counts'].median()),'median_genes':float(a.obs.loc[sel,'n_genes'].median())}
+ for lin,gs in panels.items():
+  keep=[g for g in gs if g in a.var_names];jj=a.var_names.get_indexer(keep);r[lin+'_score']=float(avg[jj].mean()) if len(jj) else np.nan
+  for gene,j in zip(keep,jj):cover.append({'cluster':cl,'panel':lin,'gene':gene,'mean_logCP10K':avg[j],'detected_fraction':det[j]})
+ rows.append(r)
+pd.DataFrame(rows).to_csv(P/'tables/REFINED_IDENTITY_PROFILE.tsv',sep='\t',index=False);pd.DataFrame(markers).to_csv(P/'tables/REFINED_MARKERS.tsv',sep='\t',index=False);pd.DataFrame(cover).to_csv(P/'tables/REFINED_MARKER_COVERAGE.tsv',sep='\t',index=False);a.write_h5ad(P/'inputs/counts_qc_identity_refined.h5ad',compression='gzip');(P/'qc/IDENTITY_REFINEMENT_COMPLETE.json').write_text(json.dumps({'status':'READY_FOR_REVIEW','cells':a.n_obs,'refined_cells':int(ii.sum()),'final_clusters':a.obs.cluster.nunique(),'time':datetime.datetime.now().astimezone().isoformat()},indent=2));print('IDENTITY_REFINED',int(ii.sum()),a.obs.cluster.nunique(),flush=True)

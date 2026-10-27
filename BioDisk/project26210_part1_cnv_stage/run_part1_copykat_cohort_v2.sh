@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+PROJECT="/mnt/BioDisk/ludingyu/project26210"
+ROOT="${PROJECT}/results/part1_rebuild_v1/03_malignancy_cnv"
+INPUT_ROOT="${ROOT}/cnv_unit_inputs_v1/copykat"
+OUTPUT_ROOT="${ROOT}/copykat_v2/samples"
+RSCRIPT="/mnt/BioDisk/ludingyu/miniconda3/envs/r453/bin/Rscript"
+UNIT_SCRIPT="${ROOT}/run_part1_copykat_unit_v2.R"
+LOG="${PROJECT}/results/part1_rebuild_v1/logs/copykat_cohort_v2.log"
+FAIL_FILE="${ROOT}/copykat_v2/failed_units_v2.tsv"
+NOT_ESTIMABLE_FILE="${ROOT}/copykat_v2/not_estimable_units_v2.tsv"
+
+mkdir -p "${OUTPUT_ROOT}" "$(dirname "${LOG}")"
+: > "${FAIL_FILE}"
+: > "${NOT_ESTIMABLE_FILE}"
+
+failures=0
+completed=0
+skipped=0
+not_estimable=0
+{
+  echo -e "started_at\t$(date --iso-8601=seconds)"
+  for input_dir in "${INPUT_ROOT}"/*
+  do
+    test -d "${input_dir}" || continue
+    unit_id="$(basename "${input_dir}")"
+    output_dir="${OUTPUT_ROOT}/${unit_id}"
+    if test -f "${output_dir}/RUN_COMPLETE"
+    then
+      echo "COPYKAT_SKIP_COMPLETED unit=${unit_id}"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    mkdir -p "${output_dir}"
+    echo "COPYKAT_START unit=${unit_id} time=$(date --iso-8601=seconds)"
+    if "${PROJECT}/check_memory_gate.sh" && \
+       "${RSCRIPT}" --vanilla "${UNIT_SCRIPT}" \
+         --input-dir "${input_dir}" \
+         --output-dir "${output_dir}" \
+         --n-cores 8
+    then
+      if test -f "${output_dir}/RUN_COMPLETE"
+      then
+        completed=$((completed + 1))
+        echo "COPYKAT_DONE unit=${unit_id} time=$(date --iso-8601=seconds)"
+      elif test -f "${output_dir}/RUN_NOT_ESTIMABLE"
+      then
+        not_estimable=$((not_estimable + 1))
+        echo -e "${unit_id}\tnot_estimable\t$(date --iso-8601=seconds)" >> "${NOT_ESTIMABLE_FILE}"
+        echo "COPYKAT_NOT_ESTIMABLE unit=${unit_id} time=$(date --iso-8601=seconds)"
+      else
+        failures=$((failures + 1))
+        echo -e "${unit_id}\tmissing_terminal_marker\t$(date --iso-8601=seconds)" >> "${FAIL_FILE}"
+        echo "COPYKAT_FAILED_MISSING_MARKER unit=${unit_id} time=$(date --iso-8601=seconds)"
+      fi
+    else
+      failures=$((failures + 1))
+      echo -e "${unit_id}\tfailed\t$(date --iso-8601=seconds)" >> "${FAIL_FILE}"
+      echo "COPYKAT_FAILED unit=${unit_id} time=$(date --iso-8601=seconds)"
+    fi
+  done
+  echo "COPYKAT_COHORT_COUNTS completed=${completed} not_estimable=${not_estimable} skipped=${skipped} failed=${failures}"
+  if test "${failures}" -eq 0
+  then
+    date --iso-8601=seconds > "${ROOT}/copykat_v2/RUN_COMPLETE"
+    echo "PART1_COPYKAT_COHORT_V2_ALL_PASS"
+  else
+    echo "PART1_COPYKAT_COHORT_V2_FAILED failures=${failures}"
+    exit 1
+  fi
+} 2>&1 | tee -a "${LOG}"

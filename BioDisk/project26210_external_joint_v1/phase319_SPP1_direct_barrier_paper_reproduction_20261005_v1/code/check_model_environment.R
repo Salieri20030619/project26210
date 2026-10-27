@@ -1,0 +1,1 @@
+for(p in c("lme4","nlme","emmeans","jsonlite")){cat(p,requireNamespace(p,quietly=TRUE),"\n")}

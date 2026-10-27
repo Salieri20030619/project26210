@@ -1,0 +1,42 @@
+from pathlib import Path
+import json,datetime,hashlib,subprocess,importlib.metadata
+import numpy as np,pandas as pd,h5py,scanpy as sc,anndata as ad
+from anndata.io import read_elem
+from scipy import sparse
+from sklearn.metrics import adjusted_rand_score
+H=Path.home();R=H/'project26210_external_joint_v1';O=R/'phase211_immune_receiver_refreeze_20260919_v1';A=R/'phase210_immune_identity_pairing_check_20260919_v1';P=Path('/mnt/BioDisk/ludingyu/project26210');SRC=P/'results/part1_rebuild_v1/03_malignancy_cnv/cnv_annotated_h5ad_v1/part1_scvi_integrated_cell_annotated_cnv_v1.h5ad'
+plan={'time':datetime.datetime.now().astimezone().isoformat(),'scope':'User-authorized receiver annotation consolidation and refreeze; no immune association tests or new figures. C4 and source objects immutable.','discovery':'All 86444 frozen broad T/NK cells; use existing 30D scVI latent, construct T/NK-only neighbors k30 Euclidean; Leiden resolution1.0 seed262211. Independent seed42 partition checks identity consistency, not biological replication. No new latent training.','annotation':'Cluster-level multi-marker identity evidence with raw count detection and logCP10K means; inherited CellTypist labels are supporting only. Do not require per-cell FOXP3/CD8 detection. Do not select cells using cytotoxicity/dysfunction outcome scores. Conflicting T/NK, conventional CD4/CD8, unconventional or nonlymphoid clusters remain unresolved if evidence inadequate.','stability':'Review each primary cluster versus seed42 overlap and identity marker coherence; preserve all minority/unstable labels in review. Do not optimize resolution for outcome association.','external':'Preserve Phase7 cluster boundaries and cell IDs. Inspect canonical marker source; unresolved TOX cluster not relabelled solely from exhaustion markers. Patient dominance is flagged separately from identity. External SPP1 macrophage is not C4.','pairing':'Same tumour library first, patients independent. >=50 mature macrophages; >=20 CD8 or NK; >=50 total classified CD4 including Treg for fraction; zero C4 and zero Treg retained when denominator and labelability are adequate. >=20 C4 for C4-intrinsic expression separately.','program_coverage':'>=3 genes each detected in >=5 receiver cells per library. No patient selection by association results. CD8 cytotoxicity NKG7 GNLY GZMB PRF1 CTSW; dysfunction PDCD1 CTLA4 LAG3 HAVCR2 TIGIT TOX CXCL13 ENTPD1. Activation panel contextual only.','multilibrary':'Use same endpoint-eligible tumour-library set for predictor and outcome, equal-weight library summaries within patient, never expand n by library/timepoint. External baseline vs on-treatment and untreated vs treated surgery frozen separately; no automatic pooled clinical interpretation.','unresolved':'Frozen explicit unresolved cells excluded from type-specific denominators; track unresolved coverage per library. Treg fraction provisional if missing CD4 assignment affects denominator; publish rule before downstream testing.','record_location':'Server only; versioned immutable freeze, input and output hashes, validation, updated root records.'}
+(O/'PLAN_BEFORE_REFREEZE.json').write_text(json.dumps(plan,indent=2))
+with (O/'MEMORY_GATE.log').open('w') as f:subprocess.run([str(P/'check_memory_gate.sh')],stdout=f,stderr=f,check=True)
+d=pd.read_csv(A/'CELL_IDENTITY_AUDIT.tsv.gz',sep='\t',index_col=0);assert len(d)==86444
+panels={'T':['CD3D','CD3E','CD3G','TRAC','TRBC1','TRBC2'],'CD8':['CD8A','CD8B'],'CD4':['CD4','IL7R','LTB','MAL','AQP3'],'Treg':['FOXP3','IKZF2','IL2RA','CTLA4','TNFRSF18'],'NK':['KLRD1','NCR1','KLRF1','NCAM1','FCGR3A','FCER1G','TYROBP'],'gdT':['TRDC','TRGC1','TRGC2'],'MAIT':['TRAV1-2','SLC4A10','ZBTB16','KLRB1'],'ILC':['KIT','GATA3','RORA','IL7R'],'Myeloid':['LST1','LYZ','CSF1R','AIF1','CD68','C1QA'],'B':['MS4A1','CD79A','CD79B','CD19'],'Epithelial':['EPCAM','KRT8','KRT18','KRT19'],'Cytotoxicity':['NKG7','GNLY','GZMB','PRF1','CTSW'],'Dysfunction':['PDCD1','CTLA4','LAG3','HAVCR2','TIGIT','TOX','CXCL13','ENTPD1'],'Activation':['FOS','JUN','JUNB','NR4A1','CD69','IL2RA'],'Naive_state':['CCR7','TCF7','LEF1','SELL'],'Cycling':['MKI67','TOP2A','STMN1']}
+with h5py.File(SRC) as f:
+ ids=f['obs/cell_id'].asstr()[:];genes=f['var/gene'].asstr()[:];sel=pd.Index(ids).isin(d.index);assert np.array_equal(ids[sel],d.index)
+ latent=f['obsm/X_scVI'][:][sel];assert np.isfinite(latent).all()
+ gene_list=sorted(set(sum(panels.values(),[])));present=[g for g in gene_list if (genes==g).sum()==1];missing=[g for g in gene_list if g not in present]
+ print('MISSING_GENES',missing,flush=True);idx=[np.flatnonzero(genes==g)[0] for g in present]
+ arr=np.zeros((len(d),len(present)),dtype=np.float64);total=np.zeros(len(d));x=f['layers/counts'];ptr=x['indptr'][:];off=0
+ for start in range(0,len(ids),4096):
+  end=min(start+4096,len(ids));mask=sel[start:end]
+  if not mask.any():continue
+  lo,hi=int(ptr[start]),int(ptr[end]);a=sparse.csr_matrix((x['data'][lo:hi],x['indices'][lo:hi],ptr[start:end+1]-lo),shape=(end-start,len(genes)))[mask]
+  assert np.isfinite(a.data).all() and (a.data>=0).all() and np.equal(a.data,np.floor(a.data)).all();n=a.shape[0];arr[off:off+n]=a[:,idx].toarray();total[off:off+n]=np.asarray(a.sum(axis=1)).ravel();off+=n
+assert off==len(d) and np.allclose(total,d.total_counts_raw,rtol=0,atol=1e-5)
+np.savez_compressed(O/'RAW_PANEL_CACHE.npz',cell_id=d.index.to_numpy(dtype=str),genes=np.asarray(present),counts=arr,total_counts=total)
+(O/'GENE_PANELS.json').write_text(json.dumps(panels,indent=2));print('COUNTS_EXTRACTED',flush=True)
+a=ad.AnnData(X=sparse.csr_matrix((len(d),1)),obs=pd.DataFrame(index=d.index));a.obsm['X_scVI_frozen']=latent
+sc.settings.n_jobs=2
+sc.pp.neighbors(a,n_neighbors=30,use_rep='X_scVI_frozen',metric='euclidean',random_state=262211,method='umap')
+for seed,key in [(262211,'cluster'),(42,'cluster_seed42')]:sc.tl.leiden(a,resolution=1.0,random_state=seed,key_added=key,flavor='igraph',n_iterations=2,directed=False)
+d['receiver_cluster']=a.obs.cluster.astype(str);d['receiver_cluster_seed42']=a.obs.cluster_seed42.astype(str)
+a.write_h5ad(O/'TNK_FROZEN_LATENT_GRAPH.h5ad',compression='gzip');d.to_csv(O/'RECEIVER_CELL_METADATA_WITH_CLUSTERS.tsv.gz',sep='\t',index_label='cell_id')
+log=np.log1p(arr/total[:,None]*10000);rows=[];summ=[];overlap=pd.crosstab(d.receiver_cluster,d.receiver_cluster_seed42);overlap.to_csv(O/'SEED_CLUSTER_OVERLAP.tsv',sep='\t')
+for cl,g in d.groupby('receiver_cluster',sort=True):
+ mask=(d.receiver_cluster==cl).to_numpy();means=log[mask].mean(axis=0);det=(arr[mask]>0).mean(axis=0);patient=g.curated_patient_id.value_counts();studies=g.study.value_counts();n=len(g);best=overlap.loc[cl].idxmax();inter=int(overlap.loc[cl,best]);union=n+int((d.receiver_cluster_seed42==best).sum())-inter
+ row=dict(cluster=cl,cells=n,patients=len(patient),studies=len(studies),max_patient_fraction=patient.iloc[0]/n,dominant_patient=patient.index[0],dominant_study=studies.index[0],max_study_fraction=studies.iloc[0]/n,T_broad_fraction=float((g.cell_type_broad_v1=='T cell').mean()),best_seed42=best,seed42_overlap_fraction=inter/n,seed42_Jaccard=inter/union,legacy_candidates=json.dumps(g.legacy_candidate.value_counts().to_dict()),legacy_top_raw=json.dumps(g.legacy_celltypist_label_raw.value_counts().head(5).to_dict()))
+ for gene in ['CD3D','CD3E','TRAC','CD4','IL7R','CD8A','CD8B','FOXP3','IKZF2','IL2RA','CTLA4','KLRD1','NCR1','KLRF1','TRDC','TRGC1','TRGC2','TRAV1-2','SLC4A10','ZBTB16','LST1','LYZ','CSF1R','MS4A1','EPCAM']:
+  if gene in present:row[gene+'_pct']=det[present.index(gene)];row[gene+'_mean']=means[present.index(gene)]
+ summ.append(row)
+ for j,gene in enumerate(present):rows.append(dict(cluster=cl,gene=gene,cells=n,mean_log1pCP10K=means[j],pct_detected=det[j]))
+pd.DataFrame(rows).to_csv(O/'CLUSTER_MARKER_EVIDENCE.tsv',sep='\t',index=False);pd.DataFrame(summ).to_csv(O/'CLUSTER_IDENTITY_REVIEW.tsv',sep='\t',index=False)
+(O/'PREPARATION_STATUS.json').write_text(json.dumps({'status':'READY_FOR_IDENTITY_REVIEW','cells':len(d),'clusters':d.receiver_cluster.nunique(),'seed42_clusters':d.receiver_cluster_seed42.nunique(),'ARI':adjusted_rand_score(d.receiver_cluster,d.receiver_cluster_seed42),'C4_untouched':True,'source_mtime':SRC.stat().st_mtime,'source_bytes':SRC.stat().st_size,'missing_genes':missing},indent=2));(O/'SOFTWARE.json').write_text(json.dumps({k:importlib.metadata.version(k) for k in ['scanpy','anndata','numpy','scipy','pandas','h5py','leidenalg','igraph']},indent=2));print((O/'PREPARATION_STATUS.json').read_text(),flush=True)

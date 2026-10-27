@@ -1,0 +1,18 @@
+suppressPackageStartupMessages({library(Seurat);library(Matrix);library(data.table)})
+P<-'/mnt/BioDisk/wangmingyuan/project26210_external_joint_v1/phase303_singlecell_source_selection_20261002_v1'
+gate<-system2('bash','/mnt/BioDisk/ludingyu/project26210/check_memory_gate.sh',stdout=TRUE,stderr=TRUE)
+writeLines(gate,file.path(P,'logs/author_memory.log'))
+if(!is.null(attr(gate,'status')) && attr(gate,'status')!=0)stop('MEMORY_GATE')
+obj<-readRDS(file.path(P,'inputs/GSE222703_author_original.rds'))
+cat('DIM',dim(obj),'\n');print(names(obj@meta.data))
+m<-as.data.table(obj@meta.data,keep.rownames='cell_id')
+fwrite(m,file.path(P,'inputs/GSE222703_AUTHOR_METADATA.tsv.gz'),sep='\t')
+for(c in names(m)){if(is.character(m[[c]]) || is.factor(m[[c]])){if(length(unique(m[[c]]))<35){cat(c,'\n');print(as.data.frame(table(m[[c]])))}}}
+x<-GetAssayData(obj,assay='RNA',layer='counts')
+stopifnot(all(x@x>=0),all(x@x==floor(x@x)),identical(colnames(x),m$cell_id))
+Matrix::writeMM(x,file.path(P,'inputs/GSE222703_AUTHOR_COUNTS.mtx'))
+writeLines(rownames(x),file.path(P,'inputs/GSE222703_AUTHOR_GENES.txt'))
+writeLines(colnames(x),file.path(P,'inputs/GSE222703_AUTHOR_CELLS.txt'))
+system2('gzip',c('-n',file.path(P,'inputs/GSE222703_AUTHOR_COUNTS.mtx')))
+writeLines(capture.output(sessionInfo()),file.path(P,'resources/AUTHOR_SESSION.txt'))
+cat('AUTHOR_EXPORT_COMPLETE\n')

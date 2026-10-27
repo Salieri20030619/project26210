@@ -1,0 +1,49 @@
+from pathlib import Path
+import pandas as pd,json,hashlib,datetime,html,csv,zipfile,subprocess
+P=Path(__file__).resolve().parents[1];R=P.parent;now=datetime.datetime.now().astimezone().isoformat()
+subprocess.run(['bash','/mnt/BioDisk/ludingyu/project26210/check_memory_gate.sh'],check=True)
+v=json.loads((P/'qc/FINAL_VALIDATION.json').read_text());assert v['status']=='PASS';tie=json.loads((P/'qc/FLOAT_TIE_SENSITIVITY.json').read_text());assert tie['P_FDR_changes']==0
+su=pd.read_csv(P/'tables/COHORT_SUMMARY_ALL.tsv',sep='\t');ov=su[su.stratum.eq('overall')]
+paragraphs=[('Phase317：肾癌外部验证支持部分转录程序联系，完整屏障关系未获支持',f'项目26210；完成时间 {now}。'),
+('1. 结论','TJ-RCC和GSE175540均显示原文公开标记重建的SPP1相关与FAP相关转录程序正向联系，去除3个共享基因后仍保留，并与去除定义基因后的ECM、胶原和TGFβ反应程序相联系。单基因SPP1—FAP及既有SPP1巨噬映射对照未提供一致正向支持，较大队列的肿瘤区CD3D/CD8A降低也未重复。本轮新增的是转录程序层面的探索性支持，不能称特定细胞协作、SPP1分子作用或完整免疫屏障机制已被外部验证。'),
+('2. 数据和独立性','GLMF/GSE210041为2患者、2切片、7079spots；TJ-RCC为12患者、12切片、34609spots；GSE175540为23患者、24切片、72952spots。合计38切片114640spots。GSE175540 c_2的两种制备切片先合并为同一患者；FFPE/冷冻分层另列，不重复计入总人数。三个来源分别报告，不合并总体P。GLMF1/2不再另算一套GSE210041。这些队列独立于原CRC患者，但此前在本项目使用过，是看过历史结果后的固定方法迁移，不能称新的盲法外部队列。'),
+('3. 固定特征与评分','按原论文Supplementary Data2的亚型内avg_logFC降序重建FAP与旧MARCO/SPP1 top25，排名边界无并列；原表旧标签保留。两组共享CXCL5、CHI3L1、INHBA，另固定删除它们后的22基因版本。使用Seurat4.3.0 AddModuleScore，nbin24、ctrl100、seed1，按实际计数矩阵总量log1p(CP10K)归一化；逐片保存实际基因及控制基因。ECM组织、胶原纤维组织、TGFβ反应取原Figure6l四患者靶基因并集，再移除全部两套状态定义基因，剩87、21、33基因。每套至少覆盖80%且>=5基因。FAP25覆盖22–25、SPP1为25，全38片具备资格；不按外部效应选择基因。'),
+('4. 模型和统计单位','每片计算未调整及深度调整偏Spearman相关，不计算spot级推断P。重复切片按患者Fisher-z合并相关、算术平均区域差。>=10患者时对非零患者效应作双侧精确符号检验，报告全部合格n及非零检验n；<10仅描述。耦合8项、基质过程12项、免疫8项分别在各队列/制备分层内BH。不可评估原P/FDR为NA，校正内部保留计划家族大小，不补造检验。原P<.05为名义筛选，FDR<.05才称校正显著。'),
+('5. 免疫区域比较','沿用Phase289冻结的形态辅助计算肿瘤区，表达区域定义作固定敏感性；只纳入boundary_input_valid spots，两侧各>=50。CD3D/CD8A均值及检出差为肿瘤样内侧减其他组织，预期负向。未新增边界、重分群或按结果挑病例。TJ-RCC矩阵为11702共享基因，库大小与obs中的全基因total_counts不同；本轮使用实际矩阵计数和归一化并记录口径，未声称全基因库大小。'),
+('6. 原作者精确评分迁移校准未通过','在任何肾癌效应计算前，原P7重建评分与作者源评分的FAP Pearson/Spearman为0.844936/0.777099，SPP1为0.684176/0.642112，均未过预设两者>=0.90。没有改名单或阈值追回通过；停止声称原作者完整精确模型迁移成功。之后在仍未计算肾癌效应时，另行冻结公开标记定义的探索性迁移范围。原文实际空间基因清单、完整预处理及随机控制基因未能全部确认，当前重建不能当完全相同测量。Phase315/316原文数值复算与P7补全保持。'),
+('7. 去共享基因后的状态程序联系在两大队列保留','深度调整后：TJ-RCC12/12正，中位rho0.171531，P0.000488281/FDR0.000976563；GSE17554023/23正，中位rho0.152709，P2.38419e-7/FDR4.76837e-7。未调整模型方向保持；制备分层完整留表。GLMF2/2正，仅描述。'),
+('8. 去除定义基因的基质程序联系获得支持','SPP1程序—ECM组织：TJ-RCC11/12正，rho0.194942/P0.00634766/FDR0.00692472；GSE17554020/23正，rho0.163723/P=FDR0.000488281。胶原组织与TGFβ反应也通过相应家族FDR。FAP程序与三类基质程序在两大队列均全患者正向。GLMF的SPP1程序—基质三项各一正一负，未呈两病例一致方向。这里只说明RNA过程对应。'),
+('9. 单基因与细胞映射对照未支持细胞协作升级','GSE175540深度调整的FAP—SPP1单基因关联17/23负，rho-0.055257/P0.0346897/FDR0.0555035，是反向名义信号；TJ-RCC6正6负、P1。FAP程序与既有SPP1巨噬状态占比在两大队列均无名义支持，GLMF两例为负。程序共变可以涉及多个来源和共同状态，不能据程序阳性称SPP1+巨噬与FAP+CAF协作已被证实。'),
+('10. 较大队列未重复肿瘤区T细胞降低','TJ-RCC主要区域10名患者：CD3D均值6/10较低、P0.753906；CD8A均值5/10较低、P1。CD3D检出反而9/10较高，中位差+0.019074即约+1.91个百分点，P0.0214844/FDR0.0859375，为反预期名义信号。GSE175540主要区域22名患者：CD3D/CD8A均值各13/22较低但P0.523467，检出各14/22较高但P0.286279。FFPE与冷冻均值方向有差异，分层未达预期降低的原P门槛。GLMF两例均值和检出都较低，只作病例对应。'),
+('11. 不可评估项与完整结果','16行模型因一侧不足50spots不可评估：GSM5924053两种区域定义，H46_T/J38_T主要形态辅助定义。所有NA、患者资格、反向及制备差异保留。本轮共1064切片行、1708患者/分层行、140汇总行；完整效应、原P、FDR和家族在tables目录。'),
+('12. 证据边界与完成状态','可以交付：公开标记定义的髓系/成纤维转录状态及基质对应获得探索性外部支持。不能交付：完整SPP1屏障外部验证成功，或TYMP参与已由本轮证明。精确评分迁移不足、单基因/映射对照未支持和免疫分布未复制共同限制这一升级。计算区域不是新增病理审核标签，低T转录信号不是迁移实验。现有正负结果各自保留，不拼成因果链。本轮尝试完成，不增换队列或阈值挽救结论；未进行TYMP定位、湿实验重分析、重训、绘图或正式稿修改。'),
+('13. 输入和实际运行','权威目录：'+str(P)+'。38原H5AD路径/样本与患者身份见resources/EXTERNAL_SECTION_REGISTER.tsv；输入大小、SHA和矩阵口径见qc/EXTERNAL_INPUT_MANIFEST.json。代码来源：https://github.com/youqiongye/CRC_scRNAseq/tree/V1.0.0；原论文：https://www.nature.com/articles/s41467-022-29366-6。运行batch_bench/bin/python code/run_pipeline.py，顺序执行prepare_external_inputs.py、r_seurat/bin/Rscript --vanilla code/score_external_sections.R、analyze_external_relations.py；独立验证validate_external_results.py，浮点审计audit_float_ties.py。环境根/mnt/BioDisk/wangmingyuan/miniconda3/envs。r_seurat为R4.1.3、Seurat4.3.0、SeuratObject4.1.3；完整R环境随包。'),
+('14. 验收和故障记录',f'4454独立检查PASS：38份原H5AD重新读取、原区域/源值/评分/效应/患者合并/精确组合数P及SciPy BH复核。评分最大误差{v["max_score_error"]:.3g}，效应最大误差{v["max_effect_error"]:.3g}。首次验证器count×(10000/total)与分析(count/total)×10000顺序不同，破坏个别浮点并列秩，相关差最多3.93e-6；只修复验证器、保留失败，未改正式结果/模型/验收容差。12位并列秩敏感性76切片比较、122患者/分层比较均无方向/P/FDR变化。正式提取、评分、统计、终验及精度审计exit0；参考评分校准门禁失败与运行exit0分开记录。'),
+('15. 资源与交付','逐片/主要阶段50GiB内存门禁通过，可用约379–380GiB；Swap仅余240kB，已记录。进度、交接、决策及结果清单已更新，旧记录备份。轻量包含完整脚本、冻结定义、控制基因、逐spot评分/元数据、全部统计与验收；大型二进制计数中间件和原H5AD留服务器。无后台分析任务。')]
+# Compact selected results, with complete comparisons retained in the delivered TSVs.
+sel=ov[((ov.family=='coupling')&ov.model.eq('depth_adjusted'))|((ov.family=='process')&ov.model.eq('depth_adjusted')&ov.endpoint.str.endswith('ECM_org_heldout'))|((ov.family=='immune')&ov.model.eq('morphology_supported'))].copy()
+sel=sel[['dataset','family','endpoint','model','n_patients','n_positive','n_negative','median_effect','p_raw','FDR']]
+text='\n\n'.join(h+'\n'+t for h,t in paragraphs)+'\n\n主要结果表（完整表见tables/COHORT_SUMMARY_ALL.tsv）\n'+sel.to_csv(sep='\t',index=False)
+style='body{max-width:1200px;margin:36px auto;padding:0 24px;font:16px/1.7 system-ui;color:#172631}h1{font-size:26px}h2{font-size:20px;margin-top:28px}p{overflow-wrap:anywhere}table{border-collapse:collapse;font-size:12px;width:100%}td,th{border:1px solid #b8c4cf;padding:6px;overflow-wrap:anywhere}th{background:#edf2f7}.wrap{overflow-x:auto}'
+ht='<!doctype html><html lang="zh"><meta charset="utf-8"><title>Phase317 外部验证</title><style>'+style+'</style><body>'
+for i,(h,t) in enumerate(paragraphs):tag='h1' if i==0 else 'h2';ht+='<'+tag+'>'+html.escape(h)+'</'+tag+'><p>'+html.escape(t)+'</p>'
+ht+='<h2>主要结果表</h2><div class="wrap">'+sel.to_html(index=False,na_rep='NA',float_format=lambda x:f'{x:.7g}')+'</div></body></html>'
+name='26210_Phase317_肾癌外部验证结果';(P/'delivery'/f'{name}.txt').write_text(text,encoding='utf-8');(P/'delivery'/f'{name}.html').write_text(ht,encoding='utf-8')
+state={'status':'EXPLORATORY_EXTERNAL_VALIDATION_COMPLETE','time':now,'transcriptional_program_association_supported':True,'complete_barrier_external_validation_success':False,'exact_reference_score_transplant_pass':False,'direct_gene_and_mapped_cell_correspondence_supported':False,'T_cell_exclusion_cross_RCC_supported':False,'technical_validation':'PASS','technical_checks':4454,'no_TYMP_positioning':True,'analysis_jobs':'none'}
+(P/'STATUS.json').write_text(json.dumps(state,indent=2));(P/'qc/FINAL_EVIDENCE_ASSESSMENT.json').write_text(json.dumps(state,indent=2))
+note='## Phase317终态（2026-10-05）：肾癌外部验证仅支持转录程序/基质联系，完整屏障未获支持\n38切片（TJ-RCC12患者、GSE17554024片23患者、GLMF2患者），114640spots。原文top25的P7评分校准未过.90（FAP Pearson.844936、SPP1.684176），失败保持；外部效应未计算前另固定公开标记探索性迁移，不称原作者精确模型验证。\n去共享基因深度调整状态相关：TJ12/12正rho.171531/P.000488281/FDR.000976563；GSE23/23正rho.152709/P2.38419e-7/FDR4.76837e-7。SPP1程序—去定义基因ECM：TJ11/12正rho.194942/P.00634766/FDR.00692472；GSE20/23正rho.163723/P=FDR.000488281。胶原/TGF程序亦支持，只作RNA程序联系。\n单基因SPP1—FAP在GSE17/23负，rho-.055257/P.0346897/FDR.0555035（反向名义）；TJ及映射SPP1占比—FAP程序无名义支持。区域免疫TJ n10：CD3D均值6负P.7539，CD8A5负P1；CD3D检出9正P.02148/FDR.08594，反预期名义。GSE n22：两均值13负P.5235，两检出14正P.2863。GLMF2例低T仅描述。不能称完整屏障外部验证成功。\n1064切片行/1708患者分层行/140汇总全量保留；4454独立检查PASS。验证器浮点运算顺序首次失败留档修复，正式结果不变；并列秩敏感性0方向/P/FDR变化。正式阶段exit0，无后台。权威phase317_RCC_external_paper_relation_validation_20261005_v1；交付delivery/26210_Phase317_肾癌外部验证结果.txt/html及ZIP。无新图、无TYMP定位、无旧C4/对象/边界/正式稿修改；不自动换阈值或队列继续。\n\n'
+for n in ['PROJECT_STATUS.md','CODEX_HANDOFF.md','DECISIONS.md']:
+ f=R/n;f.write_text(note+f.read_text())
+f=R/'AGENTS.md';f.write_text(f.read_text()+'\n\n## 2026-10-05 外部验证任务与结果边界\n用户授权尝试外部验证，Phase317已完成三个既有肾癌队列公开标记的探索性迁移。程序/基质联系得到支持，单基因/映射与T排斥未一致支持；精确评分迁移校准未过。不得将技术QC通过写成完整屏障验证成功，不用程序阳性替换反向。当前无TYMP定位或扩大验证任务。\n')
+with (R/'RESULTS_MANIFEST.tsv').open('a',newline='') as f:
+ w=csv.writer(f,delimiter='\t',lineterminator='\n')
+ for rid,kind,path in [('phase317_protocol','protocol','resources/EXTERNAL_PROTOCOL_FROZEN.json'),('phase317_reference_calibration','failed_reference_calibration','qc/REFERENCE_CALIBRATION.tsv'),('phase317_section_results','exploratory_external','tables/SECTION_EFFECTS_ALL.tsv'),('phase317_patient_results','patient_effects','tables/PATIENT_EFFECTS_ALL.tsv'),('phase317_cohort_results','statistics','tables/COHORT_SUMMARY_ALL.tsv'),('phase317_assessment','mixed_evidence','qc/FINAL_EVIDENCE_ASSESSMENT.json'),('phase317_report','report',f'delivery/{name}.txt')]:w.writerow([rid,'Phase317',kind,str(P/path),now,'TECHNICAL_PASS;FULL_BARRIER_NOT_SUPPORTED',str(P/'qc/FINAL_VALIDATION.json'),'4454checks;exploratory markers;exact reference gate failed;all P/FDR/negative results retained'])
+files=[f for f in P.rglob('*') if f.is_file() and 'root_record_backups' not in f.parts and f.suffix not in ['.bin','.zip'] and f.name not in ['PACKAGE_FILES.json','DELIVERY_VALIDATION.json']]
+manifest={str(f.relative_to(P)):{'bytes':f.stat().st_size,'sha256':hashlib.sha256(f.read_bytes()).hexdigest()} for f in files};(P/'delivery/PACKAGE_FILES.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False));files.append(P/'delivery/PACKAGE_FILES.json')
+archive=P/'delivery/26210_Phase317_external_validation_results.zip'
+with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
+ for f in files:z.write(f,str(f.relative_to(P)))
+with zipfile.ZipFile(archive) as z:
+ assert z.testzip() is None
+ for n,vv in manifest.items():assert hashlib.sha256(z.read(n)).hexdigest()==vv['sha256']
+out={'status':'PASS','zip':str(archive),'bytes':archive.stat().st_size,'sha256':hashlib.sha256(archive.read_bytes()).hexdigest(),'report_sha256':hashlib.sha256((P/'delivery'/f'{name}.txt').read_bytes()).hexdigest(),'members':len(files),'all_member_SHA_CRC':'PASS','complete_barrier_supported':False};(P/'qc/DELIVERY_VALIDATION.json').write_text(json.dumps(out,indent=2));print(json.dumps(out,indent=2))

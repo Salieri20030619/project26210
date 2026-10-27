@@ -1,0 +1,5 @@
+cat('R',R.version.string,'\n')
+cat('nichenetr',system.file(package='nichenetr'),'\n')
+cat('Seurat',system.file(package='Seurat'),'\n')
+cat('libs',paste(.libPaths(),collapse='|'),'\n')
+if(requireNamespace('nichenetr',quietly=TRUE))print(as.data.frame(data(package='nichenetr')$results))

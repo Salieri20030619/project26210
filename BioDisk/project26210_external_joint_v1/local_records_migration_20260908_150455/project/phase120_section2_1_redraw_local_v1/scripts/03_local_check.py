@@ -1,0 +1,4 @@
+﻿from pathlib import Path
+import pandas as pd
+r=Path('D:/project26210_external_joint_v1');q=r/'phase32_part1_m03_cnv_clone_trees_local_v1';n=pd.read_csv(q/'results_local_v1/m03_tree_nodes_cnmf_annotation_v1.tsv',sep='\t');c=pd.read_csv(q/'input_snapshot_local_v1/formal_cell_cnv_clone_assignments_v1.tsv.gz',sep='\t');b=pd.read_csv(r/'phase43_part1_client_figures_local_v1/source_remote_v1/tumor_epithelial_malignancy_calls_v1.tsv.gz',sep='\t')
+print(n[n.infercnv_unit.isin(['GSE207493__RCC104','GSE207493__RCC86','GSE156632__RCC4','GSE156632__RCC5'])][['infercnv_unit','node_id','clone_cells','dominant_cnmf_factor','tree_depth_from_neutral']].to_string(index=False));print('Counts',len(c),len(b), 'matched',c.exact_cell_id.isin(b.exact_cell_id).sum());print('summary',c.groupby('infercnv_unit').size().to_string());print(b.malignancy_status_v1.value_counts().to_string())

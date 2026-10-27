@@ -1,0 +1,42 @@
+args<-commandArgs(TRUE);p<-normalizePath(args[1])
+options(warn=1)
+suppressPackageStartupMessages({library(fgsea);library(data.table)})
+jobs<-read.delim(file.path(p,"gsea","JOBS.tsv"),stringsAsFactors=FALSE,check.names=FALSE)
+jobs<-jobs[jobs$patient_n>=10,];jobs<-jobs[order(jobs$family!="primary",jobs$dataset,jobs$model,jobs$version,jobs$library),]
+backup<-file.path(p,"gsea","initial_1000perm");dir.create(backup,showWarnings=FALSE)
+writeLines(deparse(body(fgsea::fgseaMultilevel)),file.path(p,"qc","fgseaMultilevel_IMPLEMENTATION.txt"))
+audit<-list();allres<-list()
+for(i in seq_len(nrow(jobs))){
+ j<-jobs[i,];old<-read.delim(j$output,stringsAsFactors=FALSE,check.names=FALSE)
+ dest<-file.path(backup,basename(j$output));if(!file.exists(dest))file.copy(j$output,dest)
+ old$nPermSimple_used<-1000L;ix<-which(is.na(old$P_GSEA))
+ if(length(ix)){
+  gate<-system2("/mnt/BioDisk/ludingyu/project26210/check_memory_gate.sh",stdout=TRUE,stderr=TRUE)
+  cat(paste(gate,collapse="\n"),"\n",file=file.path(p,"logs","memory_gate.log"),append=TRUE)
+  if(!is.null(attr(gate,"status"))&&attr(gate,"status")!=0)stop("Memory gate failed")
+  r<-read.delim(j$rank_path,stringsAsFactors=FALSE);r<-r[order(-r$rank,r$gene),];v<-setNames(r$rank,r$gene)
+  lines<-strsplit(readLines(j$gmt_path),"\t",fixed=TRUE)
+  paths<-setNames(lapply(lines,function(z)z[-c(1,2)]),vapply(lines,function(z)z[1],character(1)))
+  set.seed(362256L+i)
+  z<-as.data.frame(fgseaMultilevel(paths[old$term[ix]],v,minSize=10,maxSize=500,eps=1e-6,nPermSimple=100000,sampleSize=101,nproc=2,gseaParam=1))
+  z$leadingEdge<-vapply(z$leadingEdge,paste,collapse=";",FUN.VALUE=character(1))
+  z<-z[match(old$term[ix],z$pathway),]
+  stopifnot(all(z$pathway==old$term[ix]),max(abs(old$ES[ix]-z$ES),na.rm=TRUE)<1e-10)
+  for(k in c("ES","NES","log2err","size","leadingEdge"))old[ix,k]<-z[[k]]
+  old$P_GSEA[ix]<-z$pval;old$seed[ix]<-362256L+i;old$nPermSimple_used[ix]<-100000L
+ }
+ old$FDR_within_run<-p.adjust(ifelse(is.na(old$P_GSEA),1,old$P_GSEA),"BH");old$FDR_within_run[is.na(old$P_GSEA)]<-NA_real_
+ write.table(old,j$output,sep="\t",row.names=FALSE,quote=FALSE,na="NA")
+ audit[[i]]<-data.frame(dataset=j$dataset,model=j$model,version=j$version,library=j$library,initial_NA=length(ix),final_NA=sum(is.na(old$P_GSEA)))
+ allres[[i]]<-old
+ cat("NA_RETRY",i,nrow(jobs),length(ix),sum(is.na(old$P_GSEA)),"\n");flush.console()
+}
+a<-rbindlist(allres,fill=TRUE)
+a[,FDR_GSEA:=p.adjust(ifelse(is.na(P_GSEA),1,P_GSEA),method="BH"),by=.(dataset,library,family)]
+a[is.na(P_GSEA),FDR_GSEA:=NA_real_]
+a[,registered_family_size:=.N,by=.(dataset,library,family)]
+orig<-file.path(p,"tables","GSEA_FULL_RESULTS.tsv.gz")
+file.copy(orig,file.path(backup,"GSEA_FULL_RESULTS_initial.tsv.gz"),overwrite=FALSE)
+fwrite(a,orig,sep="\t",na="NA")
+fwrite(rbindlist(audit),file.path(p,"qc","GSEA_NUMERICAL_RETRY_AUDIT.tsv"),sep="\t")
+writeLines(c("PASS",as.character(Sys.time()),paste("jobs",nrow(jobs)),paste("rows",nrow(a)),paste("remaining_NA",sum(is.na(a$P_GSEA)))),file.path(p,"GSEA_COMPLETE.txt"))

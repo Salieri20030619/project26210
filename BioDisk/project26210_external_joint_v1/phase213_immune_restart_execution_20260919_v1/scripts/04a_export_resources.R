@@ -1,0 +1,8 @@
+suppressPackageStartupMessages(library(Matrix))
+H<-'/mnt/BioDisk/wangmingyuan';R<-file.path(H,'project26210_external_joint_v1');O<-file.path(R,'phase213_immune_restart_execution_20260919_v1/I4_directed_communication/resources')
+dbpath<-file.path(R,'phase35_part1_c01_c04_cell_communication_v1/resource_lock_v1/CellChatDB.human_v1.rds');db<-readRDS(dbpath)
+x<-as.data.frame(db$interaction,stringsAsFactors=FALSE);sp<-x[x$ligand=='SPP1',,drop=FALSE];stopifnot(nrow(sp)==9);write.table(sp,file.path(O,'CELLCHAT_SPP1_INTERACTIONS.tsv'),sep='\t',row.names=FALSE,quote=FALSE)
+co<-as.data.frame(db$complex,stringsAsFactors=FALSE);co$complex_name<-rownames(co);write.table(co[co$complex_name %in% sp$receptor,,drop=FALSE],file.path(O,'CELLCHAT_SPP1_RECEPTOR_COMPLEXES.tsv'),sep='\t',row.names=FALSE,quote=FALSE)
+netdir<-'/mnt/BioDisk/ludingyu/project26210/external/nichenet';lt<-readRDS(file.path(netdir,'ligand_target_matrix_nsga2r_final.rds'));stopifnot('SPP1' %in% colnames(lt));w<-as.numeric(lt[,'SPP1']);tab<-data.frame(gene=rownames(lt),regulatory_potential=w);write.table(tab,file.path(O,'NICHE_NET_SPP1_FULL_PRIOR.tsv'),sep='\t',row.names=FALSE,quote=FALSE)
+lr<-as.data.frame(readRDS(file.path(netdir,'lr_network_human_21122021.rds')));write.table(lr[lr$from=='SPP1',,drop=FALSE],file.path(O,'NICHE_NET_SPP1_LR_PRIOR.tsv'),sep='\t',row.names=FALSE,quote=FALSE)
+writeLines(capture.output(sessionInfo()),file.path(O,'R_SESSION_INFO.txt'));writeLines('PASS_RESOURCE_EXPORT',file.path(O,'STATUS.txt'));cat('RESOURCE_EXPORT_COMPLETE',nrow(sp),'SPP1 receptor pairs\n')

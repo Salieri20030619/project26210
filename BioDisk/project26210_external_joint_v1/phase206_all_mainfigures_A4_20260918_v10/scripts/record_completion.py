@@ -1,0 +1,10 @@
+from pathlib import Path
+import shutil,json,datetime,hashlib
+r=Path.cwd();d=r/'phase206_all_mainfigures_A4_20260918_v10'
+t='\n\n## 2026-09-18 Phase206：三张主图统一A4单页与字号v10\n用户明确三张图都按填满一页的实际尺寸制作，图内不要大量说明。Fig1/2/3均完成210×297mm单页、约190mm有效宽度；最小可提取字体6pt、标题7.5pt、编号约10pt，图内保留短标题、轴/刻度、群名、图例、关键数值。长说明/统计口径及P/FDR移入独立图注和原统计附件。旧报告不变。\nFig1保留原7面板；31个患者×程序profile改为P01–P31短索引（仍19个生物学患者），完整映射附MD；原regulon24基因矩阵与树通过原值一致性断言，网络保留71节点71边，蛋白KDE原网格。CNV稀疏标示染色体编号不删染色体。\nFig2保留A–F编号，右上C相关图、右中B原轨迹及D单幅合并候选密度；E双环改成通栏消除左侧空挡，F热图底部通栏。Top20原行Z/点面积及排序不变，三群/联合/整体统计不变。D仅合并重复空间展示，原冻结成员坐标与KDE保持。\nFig3保留38marker热图、四表达等高线、C4 GSEA及原髓系轨迹/五类表达曲线；四表达场与phase193逐元素一致；GSEA仍26患者/299条KEGG校正家族，无联合群替换。三张图未重新运行生物学模型或新增检验。\n权威phase206_all_mainfigures_A4_20260918_v10。本地C:/Users/31937/Downloads/26210/35_三张主图_A4单页_v10。3个PDF、3个SVG、3个600dpiPNG、独立图注和6个统计/索引附件，共16文件，16/16本地哈希匹配。完成页面尺寸、字体、边界及实际PDF/Poppler渲染检查；首字母渲染兼容问题最终以独立矢量笔画编号修复。\n当前断点：三张主图均以本轮v10为当前版，原数值与所有旧版留档，完整脚本在scripts。全部授权任务完成，无运行计算任务。后续调整不要再次使用340mm宽画布或将整张大图机械缩到A4。\n'
+for name in ['PROJECT_STATUS.md','CODEX_HANDOFF.md','DECISIONS.md','RESULTS_MANIFEST.tsv','AGENTS.md']:shutil.copy2(r/name,d/'record_backup'/name)
+for name in ['PROJECT_STATUS.md','CODEX_HANDOFF.md','DECISIONS.md']:
+ with (r/name).open('a') as f:f.write(t)
+with (r/'AGENTS.md').open('a') as f:f.write('\n\n### 2026-09-18 主图最终尺寸与文字要求\n用户要求三张主图都按A4单页实际尺寸制作，减少图内解释。当前phase206 v10为210×297mm，文字最小6pt，长说明/统计口径另存图注；不能再先画超大图后机械缩小。后续保持每张主图一页、充分利用页面、无明显空挡。\n')
+with (r/'RESULTS_MANIFEST.tsv').open('a') as f:f.write('\nphase206_all_mainfigures_A4_v10\tphase206\tthree_mainfigures\t'+str(d/'delivery')+'\t'+datetime.datetime.now().isoformat()+'\tPASS\t3 A4 one-page PDFs; minimum 6pt; independent visual QA; 16 local hash matches\tMinimal on-figure prose; full captions/statistics separate; Fig2 rings full width\n')
+v=json.loads((d/'qc/FONT_PAGE_AUDIT.json').read_text());(d/'qc/FINAL_VALIDATION.json').write_text(json.dumps(dict(pages=v,visual_review='PASS; actual saved PDF and Poppler exports reviewed',local_sha256_matches=16,models_rerun=False,statistics_changed=False,patient_profile_keys=31),indent=2));print('COMPLETION_RECORDED')

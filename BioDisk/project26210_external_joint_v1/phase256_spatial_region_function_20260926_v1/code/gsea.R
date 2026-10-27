@@ -1,0 +1,33 @@
+args<-commandArgs(TRUE);p<-normalizePath(args[1])
+suppressPackageStartupMessages({library(fgsea);library(data.table)})
+jobs<-read.delim(file.path(p,"gsea","JOBS.tsv"),stringsAsFactors=FALSE,check.names=FALSE)
+jobs<-jobs[jobs$patient_n>=10,];jobs<-jobs[order(jobs$family!="primary",jobs$dataset,jobs$model,jobs$version,jobs$library),]
+writeLines(c(capture.output(sessionInfo()),paste("fgsea",as.character(packageVersion("fgsea")))),file.path(p,"qc","R_GSEA_ENVIRONMENT.txt"))
+allres<-list()
+for(i in seq_len(nrow(jobs))){
+ j<-jobs[i,]
+ gate<-system2("/mnt/BioDisk/ludingyu/project26210/check_memory_gate.sh",stdout=TRUE,stderr=TRUE)
+ cat(paste(gate,collapse="\n"),"\n",file=file.path(p,"logs","memory_gate.log"),append=TRUE)
+ if(!is.null(attr(gate,"status"))&&attr(gate,"status")!=0)stop("Memory gate failed")
+ r<-read.delim(j$rank_path,stringsAsFactors=FALSE);r<-r[order(-r$rank,r$gene),]
+ v<-setNames(r$rank,r$gene);stopifnot(all(is.finite(v)),!anyDuplicated(names(v)))
+ lines<-strsplit(readLines(j$gmt_path),"\t",fixed=TRUE)
+ paths<-setNames(lapply(lines,function(z)z[-c(1,2)]),vapply(lines,function(z)z[1],character(1)))
+ set.seed(262256L+i)
+ z<-fgseaMultilevel(pathways=paths,stats=v,minSize=10,maxSize=500,eps=1e-6,nPermSimple=1000,sampleSize=101,nproc=2,gseaParam=1)
+ z<-as.data.frame(z);z$leadingEdge<-vapply(z$leadingEdge,paste,collapse=";",FUN.VALUE=character(1))
+ z$dataset<-j$dataset;z$model<-j$model;z$version<-j$version;z$library<-j$library;z$family<-j$family;z$patient_n<-j$patient_n
+ z$seed<-262256L+i;z$GSEA_P_scope<-"gene_set_randomization_conditional_on_patient_derived_rank_not_patient_permutation"
+ names(z)[names(z)=="padj"]<-"FDR_within_run";names(z)[names(z)=="pval"]<-"P_GSEA";names(z)[names(z)=="pathway"]<-"term"
+ stopifnot(nrow(z)==length(paths))
+ write.table(z,j$output,sep="\t",row.names=FALSE,quote=FALSE,na="NA")
+ allres[[i]]<-z
+ cat("GSEA_DONE",i,nrow(jobs),j$dataset,j$model,j$version,j$library,nrow(z),"\n")
+ flush.console()
+}
+a<-rbindlist(allres,fill=TRUE)
+a[,FDR_GSEA:=p.adjust(ifelse(is.na(P_GSEA),1,P_GSEA),method="BH"),by=.(dataset,library,family)]
+a[is.na(P_GSEA),FDR_GSEA:=NA_real_]
+a[,registered_family_size:=.N,by=.(dataset,library,family)]
+fwrite(a,file.path(p,"tables","GSEA_FULL_RESULTS.tsv.gz"),sep="\t",na="NA")
+writeLines(c("PASS",as.character(Sys.time()),paste("jobs",nrow(jobs)),paste("rows",nrow(a))),file.path(p,"GSEA_COMPLETE.txt"))

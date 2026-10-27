@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+tail --pid=3016563 -f /dev/null
+if [ "$(cat phase291_spatial_null_TYMP_matched_regions_20260930_v1/logs/analyze.exit)" != "0" ]; then exit 1; fi
+export OPENBLAS_NUM_THREADS=4 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
+/mnt/BioDisk/wangmingyuan/miniconda3/envs/batch_bench/bin/python -u phase291_spatial_null_TYMP_matched_regions_20260930_v1/code/validate.py > phase291_spatial_null_TYMP_matched_regions_20260930_v1/logs/validate.log 2>&1
+rc=$?
+printf '%s\n' "$rc" > phase291_spatial_null_TYMP_matched_regions_20260930_v1/logs/validate.exit
+exit "$rc"

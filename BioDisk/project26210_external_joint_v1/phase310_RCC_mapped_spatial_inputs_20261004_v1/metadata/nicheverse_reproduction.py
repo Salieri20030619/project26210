@@ -1,0 +1,107 @@
+"""Regression anchor: the package reproduces the b32k reference RCC codes exactly.
+
+This encodes the reproducibility contract for the b32k checkpoint (the 0.2.0
+default configuration behind the Cancer Cell RCC + BrM results): batch size
+32768, seed 9, spatial graph ``knn_radius`` at radius 50 microns, k_neighbors 20,
+weighted_mean aggregation. Running the package on a real sample from the
+173-sample RCC/BrM cohort yields cell-code and neighborhood-code assignments that
+are byte-for-byte identical (100% per-cell match, SHA256-equal) to the codes
+stored in the b32k checkpoint's annotated AnnData.
+
+It is opt-in so the fast unit suite is unaffected: it only runs when
+``NICHEVERSE_RUN_RCC_REPRO=1`` is set, ``NICHEVERSE_RCC_CKPT_DIR`` points at the
+production checkpoint directory, AND the checkpoint + adata are present (they are
+large and live outside the repo). There is no default path; the test is skipped
+unless ``NICHEVERSE_RCC_CKPT_DIR`` is set. Re-run after every refactor milestone
+(on a compute node, it loads a multi-GB backed AnnData)::
+
+    NICHEVERSE_RUN_RCC_REPRO=1 \\
+        NICHEVERSE_RCC_CKPT_DIR=/path/to/production/checkpoint/dir \\
+        pytest tests/test_reproduction_rcc.py -q
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+_CKPT_ENV = os.environ.get("NICHEVERSE_RCC_CKPT_DIR")
+_CKPT_DIR = Path(_CKPT_ENV) if _CKPT_ENV else None
+_PT = _CKPT_DIR / "hierarchical_vqvae_checkpoint.pt" if _CKPT_DIR else None
+_ADATA = _CKPT_DIR / "adata_with_hierarchical_embeddings.h5ad" if _CKPT_DIR else None
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("NICHEVERSE_RUN_RCC_REPRO") != "1"
+    or _CKPT_DIR is None
+    or not (_PT.exists() and _ADATA.exists()),
+    reason="set NICHEVERSE_RUN_RCC_REPRO=1 and NICHEVERSE_RCC_CKPT_DIR=<production checkpoint dir> to run",
+)
+
+# b32k reference architecture (matches the checkpoint's train_config.json).
+_RCC_CFG = dict(
+    hidden_dims=(256, 128),
+    cell_embedding_dim=64,
+    cell_num_embeddings=256,
+    neighborhood_embedding_dim=256,
+    neighborhood_num_embeddings=32,
+    commitment_cost=0.25,
+    use_cross_attention=True,
+)
+
+
+def test_reproduces_rcc_b32k_codes_sha_exact():
+    import anndata as ad
+    import scipy.sparse as sp
+
+    from nicheverse.models import ModelConfig, load_checkpoint
+    from nicheverse.training import predict_codes
+    from nicheverse.utils import seed_everything, sha256_array
+
+    seed_everything(9, deterministic=True)
+    backed = ad.read_h5ad(_ADATA, backed="r")
+    gene_names = tuple(map(str, backed.var_names))
+    col = "sample_id" if "sample_id" in backed.obs.columns else "sample"
+    vc = backed.obs[col].value_counts()
+    pick = vc[(vc > 5000) & (vc < 80000)].sort_values().index[0]
+    idx = np.where(backed.obs[col].astype(str).values == pick)[0]
+    x = backed.X[idx, :]
+    x = x.toarray() if sp.issparse(x) else np.asarray(x)
+    sub = ad.AnnData(
+        X=np.asarray(x, np.float32), obs=backed.obs.iloc[idx].copy(), var=backed.var.copy()
+    )
+    sub.obsm["spatial"] = np.asarray(backed.obsm["spatial"])[idx, :]
+    sub.obs[col] = pick
+    backed.file.close()
+
+    ref_cell = sub.obs["cell_codebook_idx"].to_numpy().astype(np.int64)
+    ref_neigh = sub.obs["neighborhood_codebook_idx"].to_numpy().astype(np.int64)
+    del sub.obs["cell_codebook_idx"], sub.obs["neighborhood_codebook_idx"]
+
+    cfg = ModelConfig(input_dim=len(gene_names), gene_names=gene_names, **_RCC_CFG)
+    model = load_checkpoint(_PT, device="cpu", config=cfg)
+    out = predict_codes(
+        sub,
+        model,
+        sample_col=col,
+        k_neighbors=20,
+        neighborhood_aggregation="weighted_mean",
+        spatial_graph="knn_radius",  # b32k reference graph (radius 50 um cap)
+        radius=50.0,
+        batch_size=32768,
+        normalize=False,
+        log1p=False,
+        device="cpu",
+        return_embeddings=False,
+        seed=9,
+        deterministic=True,
+    )
+    pred_cell = out.obs["cell_codebook_idx"].to_numpy().astype(np.int64)
+    pred_neigh = out.obs["neighborhood_codebook_idx"].to_numpy().astype(np.int64)
+
+    assert (pred_cell == ref_cell).mean() == 1.0, "cell codes drifted from production"
+    assert (pred_neigh == ref_neigh).mean() == 1.0, "neighborhood codes drifted from production"
+    assert sha256_array(pred_cell) == sha256_array(ref_cell)
+    assert sha256_array(pred_neigh) == sha256_array(ref_neigh)
